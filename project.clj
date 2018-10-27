@@ -11,7 +11,7 @@
   :pedantic? :abort
 
   :dependencies
-  [[org.clojure/clojure "1.8.0"]
+  [[org.clojure/clojure "1.9.0"]
    [org.clojure/test.check "0.9.0"]
    [mvxcvi/puget "1.0.2"]]
 
@@ -32,4 +32,4 @@
 
   :profiles
   {:coverage
-   {:plugins [[lein-cloverage "1.0.10"]]}})
+   {:plugins [[lein-cloverage "1.0.13"]]}})
