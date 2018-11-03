@@ -16,8 +16,8 @@
     (keys @system))
 
   (check
-    [this model result]
-    (is (= (not-empty (sort (keys model))) result))))
+    [this {:keys [data]} result]
+    (is (= (not-empty (sort (keys data))) result))))
 
 
 ;; This operation specifies a key to lookup in the store, so it defines a
@@ -27,16 +27,16 @@
   [k]
 
   (gen-args
-    [context]
-    [(gen/elements (:keys context))])
+    [state]
+    [(gen/elements (:keys state))])
 
   (apply-op
     [this system]
     (get @system k))
 
   (check
-    [this model result]
-    (is (= (get model k) result))))
+    [this state result]
+    (is (= (get-in state [:data k]) result))))
 
 
 ;; Put is a side-effecting entry, so it defines an `update-model` method. This
@@ -47,8 +47,8 @@
   [k v]
 
   (gen-args
-    [context]
-    {:k (gen/elements (:keys context))
+    [state]
+    {:k (gen/elements (:keys state))
      :v gen/large-integer})
 
   (apply-op
@@ -57,12 +57,12 @@
     v)
 
   (check
-    [this model result]
+    [this state result]
     (is (= v result)))
 
   (update-model
-    [this model]
-    (assoc model k v)))
+    [this state]
+    (update state :data assoc k v)))
 
 
 ;; Remove is also side-effecting, but does not define any checking logic. It
@@ -72,8 +72,8 @@
   [k]
 
   (gen-args
-    [context]
-    (gen/hash-map :k (gen/elements (:keys context))))
+    [state]
+    (gen/hash-map :k (gen/elements (:keys state))))
 
   (apply-op
     [this system]
@@ -81,20 +81,20 @@
     nil)
 
   (update-model
-    [this model]
-    (dissoc model k)))
+    [this state]
+    (update state :data dissoc k)))
 
 
 (def op-generators
-  "Returns a vector of operation generators when called with the test context."
+  "Returns a vector of operation generators when called with the initial state."
   (juxt gen->ListKeys
         gen->GetEntry
         gen->PutEntry
         gen->RemoveEntry))
 
 
-(def gen-context
-  "Generator for test contexts; this gives the set of possible keys to use in
+(def gen-init-state
+  "Generator for initial states; this contains the set of possible keys to use in
   operations."
   (gen/hash-map :keys (gen/set (gen/fmap (comp keyword str) gen/char-alpha) {:min-elements 1})))
 
@@ -103,7 +103,7 @@
   (carly/check-system "basic linear store tests" 100
     #(atom (sorted-map))
     op-generators
-    :context-gen gen-context
+    :init-state-gen gen-init-state
     :concurrency 1
     :repetitions 1))
 
@@ -112,6 +112,6 @@
   (carly/check-system "concurrent store tests" 20
     #(atom (sorted-map))
     op-generators
-    :context-gen gen-context
+    :init-state-gen gen-init-state
     :concurrency 4
     :repetitions 3))

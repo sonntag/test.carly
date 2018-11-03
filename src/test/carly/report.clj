@@ -239,12 +239,12 @@
       (printf "Shrank inputs %s steps after searching %s nodes\n"
               (colorize (:depth shrunk) :cyan)
               (colorize (:total-nodes-visited shrunk) :cyan)))
-    (when-let [[context op-seqs] (get-in summary
-                                         [:shrunk :smallest]
-                                         (:fail summary))]
+    (when-let [[init-state op-seqs] (get-in summary
+                                            [:shrunk :smallest]
+                                            (:fail summary))]
       (newline)
-      (println "Context:")
-      (pprint context)
+      (println "Initial State:")
+      (pprint init-state)
       (newline)
       (println "Operation sequences:")
       (doseq [[i ops] (or (get-in summary [:shrunk-result :op-results])

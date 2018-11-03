@@ -10,14 +10,14 @@
     "Apply the operation to the system, returning a result value.")
 
   (check
-    [operation model result]
+    [operation state result]
     "Validate an operation given the model state and the response from the
     system being tested. May include `clojure.test/is` assertions, and should
     return a boolean value indicating overall success or failure.")
 
   (update-model
-    [operation model]
-    "Apply an update to the model based on the operation."))
+    [operation state]
+    "Apply an update to the model state based on the operation."))
 
 
 (defn apply-ops!

@@ -6,12 +6,12 @@
     [test.carly.op :as op]))
 
 
-;; A world represents a point in time along a possible history. The `model`
+;; A world represents a point in time along a possible history. The `state`
 ;; holds the current representation of the system, the `history` is the
 ;; sequence of operations which have already happened, and `pending` is a map
 ;; from thread ids to lists of pending operations for each thread.
 (defrecord World
-  [model history pending futures])
+  [state history pending futures])
 
 
 (defn end-of-line?
@@ -48,11 +48,11 @@
 
 
 (defn initialize
-  "Initialize a new world state given the initial model and a map of pending
+  "Initialize a new world state given the initial state and a map of pending
   operations."
-  [model pending]
+  [state pending]
   (map->World
-    {:model model
+    {:state state
      :history []
      :pending pending
      :futures (future-count pending)}))
@@ -72,9 +72,9 @@
      (when-not (contains? op ::op/result)
        (throw (IllegalStateException.
                 (format "Cannot step op %s with no result" (pr-str op)))))
-     (when (op/check op (:model world) (::op/result op))
+     (when (op/check op (:state world) (::op/result op))
        (-> world
-           (update :model (partial op/update-model op))
+           (update :state (partial op/update-model op))
            (update :history conj (assoc op ::thread thread-id))
            (update :pending pop-pending thread-id)
            (as-> w (assoc w :futures (future-count (:pending w)))))))))
@@ -91,4 +91,4 @@
   "Return the key used to compare worlds which are equivalent nodes in the
   graph of possible futures."
   [world]
-  [(:model world) (:pending world)])
+  [(:state world) (:pending world)])

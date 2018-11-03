@@ -117,13 +117,13 @@
 
 (defn search-worldlines
   "Run up to `thread-count` worker threads to search through worldlines
-  starting from the given `model` to find valid linearizations of the
+  starting from the given `state` to find valid linearizations of the
   `thread-results`."
-  [thread-count model thread-results]
+  [thread-count state thread-results]
   (when (empty? thread-results)
     (throw (RuntimeException.
              "Cannot search the worldless void (thread results were empty)")))
-  (let [origin (world/initialize model thread-results)]
+  (let [origin (world/initialize state thread-results)]
     (if (= 1 (:futures origin))
       (linear-search origin)
       (parallel-search origin thread-count))))

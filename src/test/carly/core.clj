@@ -49,10 +49,10 @@
 
          ~(if-let [[sym args & body] (defined 'check)]
             (list sym args (report/wrap-report-check body))
-            '(check [op model result] true))
+            '(check [op state result] true))
 
          ~(or (defined 'update-model)
-              '(update-model [op model] model)))
+              '(update-model [op state] state)))
 
        (defn ~(symbol (str "gen->" (name op-name)))
          ~(str "Constructs a " (name op-name) " operation generator.")
@@ -75,7 +75,7 @@
 
 
 (defn- waitable-ops
-  "Takes a function from context to vector of op generators and returns a
+  "Takes a function from state to vector of op generators and returns a
   new function which additionally returns the wait op as the first result"
   [op-generators]
   (comp (partial cons (gen->Wait nil)) op-generators))
@@ -86,19 +86,19 @@
 
 (defn- gen-test-inputs
   "Create a generator for inputs to a system under test. This generator
-  produces a context and a collection of sequences of operations generated from
-  the context."
-  [context-gen ctx->op-gens max-concurrency]
+  produces an initial state and a collection of sequences of operations
+  generated from the initial state."
+  [init-state-gen ctx->op-gens max-concurrency]
   (gen/bind
     (gen/tuple
-      context-gen
+      init-state-gen
       (if (<= max-concurrency 1)
         (gen/return 1)
         (gen/choose 1 max-concurrency)))
-    (fn [[context concurrency]]
+    (fn [[init-state concurrency]]
       (gen/tuple
-        (gen/return context)
-        (-> (ctx->op-gens context)
+        (gen/return init-state)
+        (-> (ctx->op-gens init-state)
             (gen/one-of)
             (gen/list)
             (gen/not-empty)
@@ -136,11 +136,11 @@
 
 (defn- run-test!
   "Runs a generative test iteration. Returns a test result map."
-  [constructor finalize! model thread-count op-seqs]
+  [constructor finalize! state thread-count op-seqs]
   (ctest/do-report
     {:type ::report/test-start})
   (let [op-results (run-ops! constructor finalize! op-seqs)
-        result (search/search-worldlines thread-count model op-results)]
+        result (search/search-worldlines thread-count state op-results)]
     (ctest/do-report
       (assoc result :type (if (:world result)
                             ::report/test-pass
@@ -193,14 +193,12 @@
   sequence of operations.
 
   Takes a test message, a single-argument constructor function which takes the
-  context and produces a new system for testing, and a function which will
-  return a vector of operation generators when called with the test context.
+  state and produces a new system for testing, and a function which will
+  return a vector of operation generators when called with the initial state.
   The remaining options control the behavior of the tests:
 
-  - `:context-gen`
-    Generator for the operation test context.
-  - `:init-model`
-    Function which returns a fresh model when called with the context.
+  - `:init-state-gen`
+    Generator for a fresh state.
   - `finalize!`
     Called with the system after running all operations. This function may
     contain additional test assertions and should clean up any resources by
@@ -217,10 +215,9 @@
    iteration-opts
    init-system
    ctx->op-gens
-   & {:keys [context-gen init-model finalize!
+   & {:keys [init-state-gen finalize!
              concurrency repetitions search-threads]
-      :or {context-gen (gen/return {})
-           init-model (constantly {})
+      :or {init-state-gen (gen/return {})
            concurrency 4
            repetitions 5
            search-threads (. (Runtime/getRuntime) availableProcessors)}
@@ -232,16 +229,15 @@
         (check/check-and-report
           iteration-opts
           (gen-test-inputs
-            context-gen
+            init-state-gen
             (cond-> ctx->op-gens
               (< 1 concurrency) (waitable-ops))
             concurrency)
-          (fn [ctx op-seqs]
-            (let [model (init-model ctx)
-                  constructor (fn system-constructor
+          (fn [state op-seqs]
+            (let [constructor (fn system-constructor
                                 []
                                 (try
-                                  (init-system ctx)
+                                  (init-system state)
                                   (catch clojure.lang.ArityException ae
                                     (init-system))))]
               (run-trial!
@@ -249,6 +245,6 @@
                 (partial run-test!
                          constructor
                          finalize!
-                         model
+                         state
                          search-threads)
                 op-seqs))))))))

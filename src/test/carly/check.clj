@@ -9,10 +9,10 @@
 
 (defn- apply-test
   "Helper to produce a property by applying the test function to a realized
-  set of arguments from some bound generator. The function should accept a
-  context map and a collection of op sequences, and return a result map with a
-  `:world` entry containing a valid terminal world on success, or nil on
-  failure."
+  set of arguments from some bound generator. The function should accept an
+  initial state and a collection of op sequences, and return a result map
+  with a `:world` entry containing a valid terminal world on success, or
+  nil on failure."
   [function]
   (fn [args]
     (try
