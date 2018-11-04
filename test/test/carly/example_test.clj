@@ -11,7 +11,7 @@
 (defop ListKeys
   []
 
-  (apply-op
+  (call
     [this system]
     (keys @system))
 
@@ -31,7 +31,7 @@
     (gen/tuple
       (gen/elements (:keys state))))
 
-  (apply-op
+  (call
     [this system]
     (get @system k))
 
@@ -40,7 +40,7 @@
     (is (= (get-in state [:data k]) result))))
 
 
-;; Put is a side-effecting entry, so it defines an `update-model` method. This
+;; Put is a side-effecting entry, so it defines an `next-state` method. This
 ;; returns an updated version of the model state after applying the operation.
 ;; This op also shows another way to generate args, by generating a map of field
 ;; keys to values.
@@ -53,7 +53,7 @@
       :k (gen/elements (:keys state))
       :v gen/large-integer))
 
-  (apply-op
+  (call
     [this system]
     (swap! system assoc k v)
     v)
@@ -62,7 +62,7 @@
     [this state result]
     (is (= v result)))
 
-  (update-model
+  (next-state
     [this state]
     (update state :data assoc k v)))
 
@@ -77,12 +77,12 @@
     [state]
     (gen/hash-map :k (gen/elements (:keys state))))
 
-  (apply-op
+  (call
     [this system]
     (swap! system dissoc k)
     nil)
 
-  (update-model
+  (next-state
     [this state]
     (update state :data dissoc k)))
 

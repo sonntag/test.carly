@@ -5,7 +5,7 @@
 (defprotocol TestOperation
   "Protocol for a test operation on a system."
 
-  (apply-op
+  (call
     [operation system]
     "Apply the operation to the system, returning a result value.")
 
@@ -15,9 +15,9 @@
     system being tested. May include `clojure.test/is` assertions, and should
     return a boolean value indicating overall success or failure.")
 
-  (update-model
+  (next-state
     [operation state]
-    "Apply an update to the model state based on the operation."))
+    "Apply the operation to the model state, returning the next state."))
 
 
 (defn apply-ops!
@@ -29,7 +29,7 @@
       (assoc
         op ::result
         (try
-          (apply-op op system)
+          (call op system)
           (catch Throwable t
             t))))
     ops))

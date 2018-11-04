@@ -74,7 +74,7 @@
                 (format "Cannot step op %s with no result" (pr-str op)))))
      (when (op/check op (:state world) (::op/result op))
        (-> world
-           (update :state (partial op/update-model op))
+           (update :state (partial op/next-state op))
            (update :history conj (assoc op ::thread thread-id))
            (update :pending pop-pending thread-id)
            (as-> w (assoc w :futures (future-count (:pending w)))))))))

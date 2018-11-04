@@ -29,7 +29,7 @@
   "Defines a new specification for a system operation test."
   [op-name attr-vec & forms]
   (let [defined (zipmap (map first forms) forms)]
-    (when-let [unknown-forms (seq (dissoc defined 'gen-args 'apply-op 'check 'update-model))]
+    (when-let [unknown-forms (seq (dissoc defined 'gen-args 'call 'check 'next-state))]
       (throw (ex-info "Unknown forms defined in operation body"
                       {:unknown (map first unknown-forms)})))
     `(do
@@ -38,15 +38,15 @@
 
          op/TestOperation
 
-         ~(or (defined 'apply-op)
-              '(apply-op [op system] nil))
+         ~(or (defined 'call)
+              '(call [op system] nil))
 
          ~(if-let [[sym args & body] (defined 'check)]
             (list sym args (report/wrap-report-check body))
             '(check [op state result] true))
 
-         ~(or (defined 'update-model)
-              '(update-model [op state] state)))
+         ~(or (defined 'next-state)
+              '(next-state [op state] state)))
 
        (defn ~(symbol (str "gen->" (name op-name)))
          ~(str "Constructs a " (name op-name) " operation generator.")
@@ -63,7 +63,7 @@
     [_]
     (gen/tuple (gen/choose 1 100)))
 
-  (apply-op
+  (call
     [this system]
     (Thread/sleep duration)))
 
