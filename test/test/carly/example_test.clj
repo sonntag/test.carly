@@ -21,14 +21,15 @@
 
 
 ;; This operation specifies a key to lookup in the store, so it defines a
-;; `gen-args` form. By returning a vector, the positional generators are used
-;; to select a value for each field in the operation.
+;; `gen-args` form. By generating a tuple, the positional values are used
+;; for each field in the operation.
 (defop GetEntry
   [k]
 
   (gen-args
     [state]
-    [(gen/elements (:keys state))])
+    (gen/tuple
+      (gen/elements (:keys state))))
 
   (apply-op
     [this system]
@@ -41,15 +42,16 @@
 
 ;; Put is a side-effecting entry, so it defines an `update-model` method. This
 ;; returns an updated version of the model state after applying the operation.
-;; This op also shows another way to generate args, by specifying a map of field
-;; keys to value generators.
+;; This op also shows another way to generate args, by generating a map of field
+;; keys to values.
 (defop PutEntry
   [k v]
 
   (gen-args
     [state]
-    {:k (gen/elements (:keys state))
-     :v gen/large-integer})
+    (gen/hash-map
+      :k (gen/elements (:keys state))
+      :v gen/large-integer))
 
   (apply-op
     [this system]

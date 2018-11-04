@@ -8,27 +8,21 @@
       [check :as check]
       [op :as op]
       [report :as report]
-      [search :as search])))
+      [search :as search]))
+  (:import (clojure.lang ArityException)))
 
 
 ;; ## Test Operation Definition
 
 (defn- generator-body
   "Macro helper to build a generator constructor."
-  [op-name [form :as body]]
-  (cond
-    (and (= 1 (count body)) (vector? form))
-      `(gen/fmap
-         (partial apply ~(symbol (str "->" (name op-name))))
-         (gen/tuple ~@form))
-    (and (= 1 (count body)) (map? form))
-      `(gen/fmap
-         ~(symbol (str "map->" (name op-name)))
-         (gen/hash-map ~@(apply concat form)))
-    :else
-      `(gen/fmap
-         ~(symbol (str "map->" (name op-name)))
-         (do ~@body))))
+  [op-name body]
+  `(gen/fmap
+     (fn [op-args#]
+       (if (vector? op-args#)
+         (apply ~(symbol (str "->" (name op-name))) op-args#)
+         (~(symbol (str "map->" (name op-name))) op-args#)))
+     (do ~@body)))
 
 
 (defmacro defop
@@ -58,7 +52,7 @@
          ~(str "Constructs a " (name op-name) " operation generator.")
          ~@(if-let [[_ args & body] (defined 'gen-args)]
              [args (generator-body op-name body)]
-             [['context]
+             [['state]
               `(gen/return (~(symbol (str "->" (name op-name)))))])))))
 
 
@@ -67,7 +61,7 @@
 
   (gen-args
     [_]
-    [(gen/choose 1 100)])
+    (gen/tuple (gen/choose 1 100)))
 
   (apply-op
     [this system]
@@ -238,7 +232,7 @@
                                 []
                                 (try
                                   (init-system state)
-                                  (catch clojure.lang.ArityException ae
+                                  (catch ArityException ae
                                     (init-system))))]
               (run-trial!
                 repetitions
