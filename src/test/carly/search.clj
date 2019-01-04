@@ -120,7 +120,7 @@
   starting from the given `state` to find valid linearizations of the
   `thread-results`."
   [thread-count state thread-results]
-  (when (empty? thread-results)
+  #_(when (empty? thread-results)
     (throw (RuntimeException.
              "Cannot search the worldless void (thread results were empty)")))
   (let [origin (world/initialize state thread-results)]

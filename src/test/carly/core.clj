@@ -8,6 +8,7 @@
       [check :as check]
       [op :as op]
       [report :as report]
+      [result :as result]
       [search :as search]))
   (:import (clojure.lang ArityException)))
 
@@ -16,55 +17,61 @@
 
 (defn- generator-body
   "Macro helper to build a generator constructor."
-  [op-name body]
+  [attr-vec body]
   `(gen/fmap
      (fn [op-args#]
        (if (vector? op-args#)
-         (apply ~(symbol (str "->" (name op-name))) op-args#)
-         (~(symbol (str "map->" (name op-name))) op-args#)))
+         (zipmap ~(mapv keyword attr-vec) op-args#)
+         op-args#))
      (do ~@body)))
+
+(defn- op-method
+  "Macro helper to build the op method definition"
+  [op-type attr-vec [method args & body]]
+  (let [op-destruct [{:keys attr-vec}]]
+    `(defmethod ~(symbol "test.carly.op" (name method)) ~op-type
+       ~(into op-destruct args)
+       ~@body)))
 
 
 (defmacro defop
   "Defines a new specification for a system operation test."
-  [op-name attr-vec & forms]
-  (let [defined (zipmap (map first forms) forms)]
-    (when-let [unknown-forms (seq (dissoc defined 'gen-args 'call 'check 'next-state))]
+  [op-type attr-vec & forms]
+  (let [[doc-str attr-vec forms] (if (string? attr-vec)
+                                   [attr-vec (first forms) (rest forms)]
+                                   [nil attr-vec forms])
+        defined (zipmap (map first forms) forms)]
+    (when-let [unknown-forms (seq (dissoc defined 'gen-args 'call 'check 'next-state
+                                          'can-generate?))]
       (throw (ex-info "Unknown forms defined in operation body"
                       {:unknown (map first unknown-forms)})))
     `(do
-       (defrecord ~op-name
-         ~attr-vec
+       (op/register ~op-type ~doc-str)
 
-         op/TestOperation
+       ~@(map (partial op-method op-type attr-vec)
+              (vals (dissoc defined 'gen-args 'check 'can-generate?)))
 
-         ~(or (defined 'call)
-              '(call [op system] nil))
+       ~(when-let [[method args & body] (defined 'check)]
+          (op-method op-type attr-vec [method args (report/wrap-report-check body)]))
 
-         ~(if-let [[sym args & body] (defined 'check)]
-            (list sym args (report/wrap-report-check body))
-            '(check [op state result] true))
+       ~(when-let [[_ args & body] (defined 'gen-args)]
+          `(defmethod op/gen-args ~op-type
+             ~(into ['op-type] args)
+             ~(generator-body attr-vec body)))
 
-         ~(or (defined 'next-state)
-              '(next-state [op state] state)))
-
-       (defn ~(symbol (str "gen->" (name op-name)))
-         ~(str "Constructs a " (name op-name) " operation generator.")
-         ~@(if-let [[_ args & body] (defined 'gen-args)]
-             [args (generator-body op-name body)]
-             [['state]
-              `(gen/return (~(symbol (str "->" (name op-name)))))])))))
+       ~(when-let [[_ args & body] (defined 'can-generate?)]
+          `(defmethod op/can-generate? ~op-type
+             ~(into ['op-type] args)
+             ~@body)))))
 
 
-(defop Wait
+(defop ::wait
   [duration]
 
-  (gen-args
-    [_]
+  (gen-args [_]
     (gen/tuple (gen/choose 1 100)))
 
-  (call
-    [this system]
+  (call [system]
     (Thread/sleep duration)))
 
 
@@ -72,31 +79,33 @@
   "Takes a function from state to vector of op generators and returns a
   new function which additionally returns the wait op as the first result"
   [op-generators]
-  (comp (partial cons (gen->Wait nil)) op-generators))
+  (comp (partial cons (op/gen-op ::wait nil)) op-generators))
 
 
 
 ;; ## Test Harness
 
+(defn- gen-op-seq
+  [init-state state->op-gen length]
+  (reduce
+    (fn [test-gen index]
+      (gen/let [[state op-seq] test-gen
+                op (state->op-gen state)]
+        [(op/next-state op state (result/pending index)) (conj op-seq op)]))
+    (gen/return [init-state []])
+    (range length)))
+
 (defn- gen-test-inputs
   "Create a generator for inputs to a system under test. This generator
   produces an initial state and a collection of sequences of operations
   generated from the initial state."
-  [init-state-gen ctx->op-gens max-concurrency]
-  (gen/bind
+  [init-state-gen state->op-gen _parallel?]
+  (gen/let [init-state init-state-gen
+            ops-size (gen/choose 0 50)]
     (gen/tuple
-      init-state-gen
-      (if (<= max-concurrency 1)
-        (gen/return 1)
-        (gen/choose 1 max-concurrency)))
-    (fn [[init-state concurrency]]
-      (gen/tuple
-        (gen/return init-state)
-        (-> (ctx->op-gens init-state)
-            (gen/one-of)
-            (gen/list)
-            (gen/not-empty)
-            (gen/vector concurrency))))))
+      (gen/return init-state)
+      (gen/fmap second
+                (gen-op-seq init-state state->op-gen ops-size)))))
 
 
 (defn- elapsed-since
@@ -110,47 +119,38 @@
   "Construct a system, run a collection of op sequences on the system (possibly
   concurrently), and shut the system down. Returns a map from thread index to
   operations updated with results."
-  [constructor finalize! op-seqs]
+  [constructor finalize! op-seq state]
   (let [start (System/nanoTime)
         system (constructor)]
     (try
-      (case (count op-seqs)
-        0 op-seqs
-        1 {0 (op/apply-ops! system (first op-seqs))}
-          (op/run-threads! system op-seqs))
+      (op/run-seq-ops! system state op-seq)
       (finally
         (when finalize!
           (finalize! system))
         (ctest/do-report
           {:type ::report/run-ops
-           :op-count (reduce + 0 (map count op-seqs))
-           :concurrency (count op-seqs)
+           :op-count (count op-seq)
            :elapsed (elapsed-since start)})))))
 
 
 (defn- run-test!
   "Runs a generative test iteration. Returns a test result map."
-  [constructor finalize! state thread-count op-seqs]
+  [constructor finalize! state op-seq]
   (ctest/do-report
     {:type ::report/test-start})
-  (let [op-results (run-ops! constructor finalize! op-seqs)
-        result (search/search-worldlines thread-count state op-results)]
-    (ctest/do-report
-      (assoc result :type (if (:world result)
-                            ::report/test-pass
-                            ::report/test-fail)))
-    (assoc result :op-results op-results)))
+  (let [result (run-ops! constructor finalize! op-seq state)]
+    (ctest/do-report result)
+    result))
 
 
 (defn- run-trial!
   "Run a generative trial involving multiple test repetitions."
-  [repetitions runner-fn op-seqs]
-  (let [start (System/nanoTime)]
+  [runner-fn op-seq]
+  (let [start (System/nanoTime)
+        repetitions 1]
     (ctest/do-report
       {:type ::report/trial-start
-       :repetitions repetitions
-       :concurrency (count op-seqs)
-       :op-count (reduce + 0 (map count op-seqs))})
+       :op-count (count op-seq)})
     (loop [i 0
            result nil]
       (if (== repetitions i)
@@ -159,7 +159,7 @@
                :repetitions repetitions
                :elapsed (elapsed-since start)})
             result)
-        (let [result (runner-fn op-seqs)]
+        (let [result (runner-fn op-seq)]
           (if (:world result)
             (recur (inc i) result)
             (do (ctest/do-report
@@ -181,64 +181,68 @@
              :type ::report/shrunk
              :shrunk-result (::check/result (meta (get-in summary [:shrunk :smallest])))))))
 
+(defn- create-ops-gen
+  [op-types]
+  (fn [state]
+    (gen/bind
+      (gen/elements
+        (filter #(op/can-generate? % state) op-types))
+      (fn [op-type]
+        (op/gen-op op-type state)))))
+
+(defn create-model
+  [new-system op-types
+   & {:keys [state-gen finalize!]
+      :or {state-gen (gen/return {})}}]
+  {:pre [(fn? new-system)]}
+  (let [ops-gen (create-ops-gen op-types)]
+    {:state-gen state-gen
+     :new-system new-system
+     :ops-gen ops-gen
+     :finalize! finalize!}))
+
+(defn gen-test-case
+  "Create a test-case generator for the given model."
+  [model & {:keys [parallel?]}]
+  (let [{:keys [state-gen ops-gen]} model
+        ops-gen (cond-> ops-gen
+                  parallel? (waitable-ops))]
+    (gen-test-inputs state-gen ops-gen parallel?)))
+
+(defn check-test-case
+  "Given a model and a generated test case, executes the test case returning
+  the result of test execution."
+  [model [state op-seq]]
+  (let [{:keys [new-system finalize!]} model]
+    (let [constructor (fn system-constructor
+                        []
+                        (try
+                          (new-system state)
+                          (catch ArityException ae
+                            (new-system))))]
+      (run-trial!
+        (partial run-test!
+                 constructor
+                 finalize!
+                 state)
+        op-seq))))
 
 (defn check-system
-  "Uses generative tests to validate the behavior of a system under a linear
-  sequence of operations.
+  "Uses generative tests no validate the behavior of a system under a sequence
+  of operations dictated by a state machine model.
 
-  Takes a test message, a single-argument constructor function which takes the
-  state and produces a new system for testing, and a function which will
-  return a vector of operation generators when called with the initial state.
-  The remaining options control the behavior of the tests:
+  Takes a test message, a model configuration object, and the following options
+  which control the behavior of the tests:
 
-  - `:init-state-gen`
-    Generator for a fresh state.
-  - `finalize!`
-    Called with the system after running all operations. This function may
-    contain additional test assertions and should clean up any resources by
-    stopping the system.
-  - `concurrency`
-    Maximum number of operation threads to run in parallel.
-  - `repetitions`
-    Number of times to run per generation to ensure repeatability.
-  - `search-threads`
-    Number of threads to run to search for valid worldlines.
+  - `parallel?`
+    If truthy will generate and run parallel tests to check for race conditions.
   - `report`
     Options to override the default report configuration."
-  [message
-   iteration-opts
-   init-system
-   ctx->op-gens
-   & {:keys [init-state-gen finalize!
-             concurrency repetitions search-threads]
-      :or {init-state-gen (gen/return {})
-           concurrency 4
-           repetitions 5
-           search-threads (. (Runtime/getRuntime) availableProcessors)}
-      :as opts}]
-  {:pre [(fn? init-system) (fn? ctx->op-gens)]}
+  [message iteration-opts model & {:keys [parallel? report]}]
   (ctest/testing message
-    (binding [report/*options* (merge report/*options* (:report opts))]
+    (binding [report/*options* (merge report/*options* report)]
       (report-test-summary
         (check/check-and-report
           iteration-opts
-          (gen-test-inputs
-            init-state-gen
-            (cond-> ctx->op-gens
-              (< 1 concurrency) (waitable-ops))
-            concurrency)
-          (fn [state op-seqs]
-            (let [constructor (fn system-constructor
-                                []
-                                (try
-                                  (init-system state)
-                                  (catch ArityException ae
-                                    (init-system))))]
-              (run-trial!
-                repetitions
-                (partial run-test!
-                         constructor
-                         finalize!
-                         state
-                         search-threads)
-                op-seqs))))))))
+          (gen-test-case model :parallel? parallel?)
+          (partial check-test-case model))))))

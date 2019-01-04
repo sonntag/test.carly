@@ -16,7 +16,7 @@
   [function]
   (fn [args]
     (try
-      (let [result (apply function args)]
+      (let [result (function args)]
         {:result (boolean (:world result))
          :function function
          ; XXX: Super gross, but we need to do this to get result metadata

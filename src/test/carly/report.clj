@@ -239,21 +239,19 @@
       (printf "Shrank inputs %s steps after searching %s nodes\n"
               (colorize (:depth shrunk) :cyan)
               (colorize (:total-nodes-visited shrunk) :cyan)))
-    (when-let [[init-state op-seqs] (get-in summary
-                                            [:shrunk :smallest]
-                                            (:fail summary))]
+    (when-let [[init-state op-seq] (get-in summary
+                                           [:shrunk :smallest]
+                                           (:fail summary))]
       (newline)
       (println "Initial State:")
       (pprint init-state)
       (newline)
       (println "Operation sequences:")
-      (doseq [[i ops] (or (get-in summary [:shrunk-result :op-results])
-                          (zipmap (range) op-seqs))]
-        (printf "thread #%d\n" (inc i))
-        (doseq [op ops]
-          (if (contains? op :test.carly.op/result)
-            (pprint [(dissoc op :test.carly.op/result) '=> (:test.carly.op/result op)])
-            (pprint op)))))
+      (doseq [op (or (get-in summary [:shrunk-result :op-results])
+                     op-seq)]
+        (if (contains? op :test.carly.op/result)
+          (pprint [(dissoc op :test.carly.op/result) '=> (:test.carly.op/result op)])
+          (pprint op))))
     (newline)
     (println "Failing assertions:")
     (run!
